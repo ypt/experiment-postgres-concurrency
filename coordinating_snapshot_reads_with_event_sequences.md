@@ -28,9 +28,9 @@ At a high level, here are some pieces of the puzzle to solve...
 
     ```
     "Hey! FYI, the snapshot was taken here in the message sequence chronology!"
-                    |
-                    v
-    msg-1 msg-2 ...   ... msg-n
+                       |
+                       v
+    msg-1 msg-2 msg-3  o  msg-4 msg-5 ...
     ```
 
 A data layer solution, change data capture, via
@@ -44,12 +44,14 @@ instead want a solution at the _application layer_?
 
 Answers, at a high level...
 
-1. Re: Challenge 1: "repeatable read" transaction isolation, or a [single query + cursor combo](cursors_and_pagination_stability.md)
-   both provide multiple stable reads at a snapshot in time.
-2. Re: Challenge 2: some sort of coordination will be required to coordinate the
+1. Re: Challenge 1: use "repeatable read" transaction isolation, or a [single query + cursor combo](cursors_and_pagination_stability.md)
+   both provide stable reads at a snapshot in time.
+2. Re: Challenge 2: use some sort of coordination mechanism coordinate the
    concurrent processes writing to the distributed log and the process that
    creates the snapshot in order to properly note _where_ in the distributed log
-   event sequence the snapshot occurs.
+   event sequence the snapshot occurs. And given our application architecture's
+   usage of an RDBMS as global shared state, maybe we can see if we are able to
+   harness that as a means of coordination...
 
 Let's see what sort of tools we can use to tackle this...
 
@@ -96,12 +98,12 @@ INSERT INTO mytable (payload) VALUES('hello-2');
 
 In session-1
 
-- Lock the rows/tables being that we will later query. This is to prevent
-  modifications to it while we're noting where our query falls within our
-  external distributed log's (i.e. Kafka, Pulsar, etc.) sequence of messages.
-  Ultimately, the goal of this is to block writes to the relevant
-  topic/partition of the distributed log while the snapshot position is being
-  noted.
+- [Lock](https://www.postgresql.org/docs/current/explicit-locking.html) the
+  rows/tables being that we will later query. This is to prevent modifications
+  to it while we're noting where our query falls within our external distributed
+  log's (i.e. Kafka, Pulsar, etc.) sequence of messages. Ultimately, the goal of
+  this is to block writes to the relevant topic/partition of the distributed log
+  while the snapshot position is being noted.
 - export the snapshot - Via
   [pg_export_snapshot](https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-SNAPSHOT-SYNCHRONIZATION).
   This is the Postgres snapshot that we will use to execute our consistent read.
@@ -144,7 +146,7 @@ INSERT INTO mytable (payload) VALUES('hello-3');
 In your app
 
 - Now that writes to the relevant partition of your distributed log are blocked,
-  do something to indicate "tthe snapshot was taken here in the message sequence
+  do something to indicate "the snapshot was taken here in the message sequence
   chronology". For example, send a marker message to the relevant distributed
   log topic.
 
